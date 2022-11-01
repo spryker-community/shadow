@@ -53,7 +53,7 @@ universal_binaries:
 
 release:
   footer: |
-    **Full Changelog**: https://github.com/towapenz/shadow/compare/{{ .PreviousTag }}...{{ .Tag }}
+    **Full Changelog**: https://github.com/andreaspenz/shadow/compare/{{ .PreviousTag }}...{{ .Tag }}
 
 nfpms:
   - file_name_template: '{{ .ConventionalFileName }}'
