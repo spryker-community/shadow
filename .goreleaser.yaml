@@ -1,0 +1,71 @@
+before:
+  hooks:
+    - go mod tidy
+
+changelog:
+  sort: desc
+  use: github
+  filters:
+    exclude:
+      - Merge branch
+      - Merge pull request
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - 386
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+      - goos: darwin
+        goarch: 386
+    main: ./
+    binary: shadow
+    ldflags: -s -w -X "main.channel=stable" -X "main.buildDate={{ .Date }}" -X "main.version={{ .Version }}"
+    flags:
+      - -trimpath
+
+archives:
+  - name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+source:
+  enabled: true
+
+snapshot:
+  name_template: next
+
+universal_binaries:
+  - replace: true
+    name_template: shadow
+
+release:
+  footer: |
+    **Full Changelog**: https://github.com/towapenz/shadow/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+nfpms:
+  - file_name_template: '{{ .ConventionalFileName }}'
+    id: packages
+    homepage: https://github.com/andreaspenz/shadow/
+    description: A tool to organize local spryker modules.
+    maintainer: Andreas Penz <andreas.penz.1989@gmail.com>
+    license: AGPL-3.0
+    vendor: andreaspenz
+    formats:
+      - apk
+      - deb
+      - rpm
+    recommends:
+      - git
