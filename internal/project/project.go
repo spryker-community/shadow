@@ -8,6 +8,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/afero"
 	"path/filepath"
+	"strings"
 )
 
 type Descriptor struct {
@@ -34,40 +35,38 @@ type StandardModule struct {
 	Directories []string
 }
 
-func LoadProject(desc Descriptor) (prj *Project, err error) {
+func LoadProject(desc Descriptor, fullLoad bool) (*Project, error) {
 	if exists, _ := filesystem.DirExists(desc.Fs, desc.ProjectDir); !exists {
-		return nil, errors.Errorf("Project dir \"%s\" does not exist", desc.ProjectDir)
+		return nil, errors.Errorf("Project dir does not exist at \"%s\"", desc.ProjectDir)
 	}
 
-	prj = &Project{
+	prj := &Project{
 		Fs:         desc.Fs,
 		ProjectDir: desc.ProjectDir,
 		ShadowDir:  filepath.Join(desc.ProjectDir, common.ShadowDir),
 	}
 
-	prj.ShadowModules, err = prj.loadShadowModules()
+	if !fullLoad {
+		return prj, nil
+	}
 
-	if err != nil {
+	if exists, _ := filesystem.DirExists(prj.Fs, prj.ShadowDir); !exists {
+		return nil, errors.Errorf("Shadow dir does not exist at \"%s\"", prj.ShadowDir)
+	}
+
+	if err := prj.loadShadowModules(); err != nil {
 		return nil, err
 	}
 
-	prj.StandardModules, err = prj.loadStandardModules()
-
-	if err != nil {
+	if err := prj.loadStandardModules(); err != nil {
 		return nil, err
 	}
 
 	return prj, nil
 }
 
-func (prj *Project) loadShadowModules() ([]*ShadowModule, error) {
-	paths, err := filesystem.Glob(prj.Fs, filepath.Join(prj.ProjectDir, common.ShadowDir, "*"))
-
-	if err != nil {
-		return nil, err
-	}
-
-	var modules []*ShadowModule
+func (prj *Project) loadShadowModules() error {
+	paths, _ := filesystem.Glob(prj.Fs, filepath.Join(prj.ProjectDir, common.ShadowDir, "*"))
 	for _, path := range paths {
 		cfgFilePath := filepath.Join(path, common.ShadowFile)
 		if exists, _ := filesystem.Exists(prj.Fs, cfgFilePath); !exists {
@@ -78,30 +77,47 @@ func (prj *Project) loadShadowModules() ([]*ShadowModule, error) {
 		links, err := config.ReadLinks(prj.Fs, cfgFilePath)
 
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		if len(links) == 0 {
-			return nil, errors.Errorf(`Empty YAML file provided at "%s"`, cfgFilePath)
+			return errors.Errorf(`Empty YAML file provided at "%s"`, cfgFilePath)
 		}
 
-		modules = append(modules, &ShadowModule{
+		preparedLinks := make(config.Links)
+		for from, to := range links {
+			from = filepath.Join(path, from)
+			to = filepath.Join(prj.ProjectDir, to)
+
+			if strings.Contains(from, "*") {
+				matches, _ := filesystem.Glob(prj.Fs, from)
+
+				for _, match := range matches {
+					preparedLinks[match] = filepath.Join(to, filepath.Base(match))
+				}
+
+				continue
+			}
+
+			if exists, _ := filesystem.Exists(prj.Fs, from); !exists {
+				continue
+			}
+
+			preparedLinks[from] = to
+		}
+
+		prj.ShadowModules = append(prj.ShadowModules, &ShadowModule{
 			Name:      filepath.Base(path),
 			ModuleDir: path,
-			Links:     links,
+			Links:     preparedLinks,
 		})
 	}
 
-	return modules, nil
+	return nil
 }
 
-func (prj *Project) loadStandardModules() ([]*StandardModule, error) {
-	paths, err := filesystem.Glob(prj.Fs, filepath.Join(prj.ProjectDir, "*", "Pyz*", "*", "*"))
-
-	if err != nil {
-		return nil, err
-	}
-
+func (prj *Project) loadStandardModules() error {
+	paths, _ := filesystem.Glob(prj.Fs, filepath.Join(prj.ProjectDir, "*", "Pyz*", "*", "*"))
 	desc := make(map[string][]string)
 	for _, path := range paths {
 		// skip symlinks
@@ -119,23 +135,14 @@ func (prj *Project) loadStandardModules() ([]*StandardModule, error) {
 	}
 
 	if len(desc) == 0 {
-		return nil, nil
+		return nil
 	}
 
-	var modules []*StandardModule
 	for name, directories := range desc {
-		modules = append(modules, &StandardModule{
+		prj.StandardModules = append(prj.StandardModules, &StandardModule{
 			Name:        name,
 			Directories: directories,
 		})
-	}
-
-	return modules, nil
-}
-
-func (prj *Project) Validate() error {
-	if exists, _ := filesystem.DirExists(prj.Fs, prj.ShadowDir); !exists {
-		return errors.Errorf(`Shadow directory does not exist at "%s"`, prj.ShadowDir)
 	}
 
 	return nil
